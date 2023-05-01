@@ -11,10 +11,9 @@ else:
 import requests
 import os
 
+SHEETY_ENDPOINT = "https://api.sheety.co/3195a9561f0219ec864578b13b2f6b62/flightDeals8467"
 
-SHEETY_ENDPOINT = "https://api.sheety.co/8e61fad103ee672e340a7289fbc2b7d7/flightDeals8467"
-
-SHEETY_AUTH_TOKEN = os.environ.get("EXPORTED_SHEETY_AUTH_TOKEN")
+SHEETY_AUTH_TOKEN = os.environ.get("EXPORTED_SHEETY_API_KEY")
 
 sheety_header = {
     "Authorization": SHEETY_AUTH_TOKEN
