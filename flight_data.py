@@ -2,93 +2,53 @@ import requests
 from data_manager import DataManager
 from dateutil.relativedelta import relativedelta
 import datetime as dt
-import os
-from dotenv import load_dotenv
 import time
-import pprint
 
-
-load_dotenv()
-
-KIWI_ENDPOINT = "https://api.tequila.kiwi.com"
-KIWI_API_KEY = os.environ.get("EXPORTED_KIWI_API_KEY")
-
-kiwi_header = {
-    "apikey": KIWI_API_KEY,
-}
+data_manager = DataManager()
 
 class FlightData:
-    #This class is responsible for structuring the flight data.
+    # This class is responsible for structuring the flight data.
     def __init__(self):
         self.best_deal = []
         self.search_response_list = []
-        self.sheety_response = DataManager()
         self.today = dt.datetime.now().date()
         self.after_6months = self.today + relativedelta(months=6)
-        self.city_codes = []
-        self.city_codes = ["PAR", "TYO", "SYD", "IST", "KUL", "NYC", "SFO", "DPS"]
         self.query_request = 0
         self.search_request = 0
         self.search_params = {}
         self.number = []
-        self.call_codes()
-        self.define_params()
+        self.via_city = ''
+        self.alt_price = ''
         self.request_search()
 
-    def call_codes(self):
-        for city in self.sheety_response.cities:
-            self.params = {
-                "term": city,
-                "location_types": "airport",
-            }
-
-            while True:
-                try:
-                    self.kiwi_response = requests.get(f"{KIWI_ENDPOINT}/locations/query", headers=kiwi_header, params=self.params)
-                    self.kiwi_response.raise_for_status()
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        self.query_request += 1
-                        print(f"Too many requests for query, waiting for 5 secs, {self.query_request} requests")
-                        time.sleep(5)
-                    else:
-                        raise e
-                else:
-                    self.city_codes.append(self.kiwi_response.json()["locations"][0]["city"]["code"])
-                    print(f"city_codes is {self.city_codes}")
-                    break
-
-    def define_params(self):
-        for code in self.city_codes:
-            self.search_params = {
-                "fly_from": "ICN",
-                "fly_to": code,
-                "date_from": self.today.strftime("%m/%d/%Y"),
-                "date_to": self.after_6months.strftime("%m/%d/%Y"),
-                "limit": 10,
-                "max_stopovers": 0
-            }
-            self.number.append(code)
-
-
     def request_search(self):
-        for code in self.city_codes:
-            self.search_params["fly_to"] = code
+        for code in data_manager.city_codes:
             while True:
                 try:
-                    self.search_response = requests.get(f"{KIWI_ENDPOINT}/search", params=self.search_params, headers=kiwi_header)
+                    self.search_response = requests.get(f"{data_manager.KIWI_ENDPOINT}/search", params={
+                        "fly_from": "ICN",
+                        "fly_to": code,
+                        "date_from": self.today.strftime("%d/%m/%Y"),
+                        "date_to": self.after_6months.strftime("%d/%m/%Y"),
+                        "limit": 10,
+                        "max_stopovers": 0
+                    }, headers=data_manager.kiwi_header)
                     self.search_response.raise_for_status()
-                    self.best_deal.append(self.search_response.json()["data"][0]["price"])
+
+                    try:
+                        self.best_deal.append(self.search_response.json()["data"][0]["price"])
+                    except IndexError:
+                        self.best_deal.append(1116)
                     break
 
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 429:
                         self.search_request += 1
-                        print(f"Too many requests for searching on {code}, waiting for 5 secs, {self.search_request} requests")
+                        print(
+                            f"Too many requests for searching on {code}, waiting for 5 secs, {self.search_request} requests")
                         time.sleep(5)
                     else:
                         raise e
-
 
             try:
                 self.search_response_list.append({
@@ -98,29 +58,45 @@ class FlightData:
                     "depart_time_UTC": self.time_converter(self.search_response.json()["data"][0]["dTimeUTC"]).strftime(
                         '%m/%d/%Y %I:%M:%S %p'),
 
-                    "arrival_time_UTC": self.time_converter(self.search_response.json()["data"][0]["aTimeUTC"]).strftime(
+                    "arrival_time_UTC": self.time_converter(
+                        self.search_response.json()["data"][0]["aTimeUTC"]).strftime(
                         '%m/%d/%Y %I:%M:%S %p'),
-                    })
+                })
             except:
-                if "arrival_IATA" == None:
-                    continue
-
-
+                self.search_response_list.append({
+                    "arrival_IATA": code,
+                    "arrival_city":"",
+                    "price": 1116,
+                    "depart_time_UTC":"",
+                    "arrival_time_UTC":"",
+                })
 
     def time_converter(self, time):
         return dt.datetime.fromtimestamp(time)
 
+    def alt_request(self, code):
+        self.search_response = requests.get(f"{data_manager.KIWI_ENDPOINT}/search", params={
+            "fly_from": "ICN",
+            "fly_to": code,
+            "date_from": self.today.strftime("%d/%m/%Y"),
+            "date_to": self.after_6months.strftime("%d/%m/%Y"),
+            "limit": 10,
+            "max_stopovers": 1
+        }, headers=data_manager.kiwi_header)
+        try:
+            self.search_response_list.append({
+                                    "via_city": self.search_response.json()["data"][0]["route"][0]["cityTo"],
+                                    "alt_price": self.search_response.json()["data"][0]["price"],
+                                    "arrival_city": self.search_response.json()["data"][0]["cityTo"],
+                                    "arrival_IATA":  self.search_response.json()["data"][0]["flyTo"],
+                                    "depart_time_UTC": self.time_converter(self.search_response.json()["data"][0]["dTimeUTC"]).strftime(
+                            '%m/%d/%Y %I:%M:%S %p'),
+                                    "arrival_time_UTC": self.time_converter(self.search_response.json()["data"][0]["aTimeUTC"]).strftime(
+                            '%m/%d/%Y %I:%M:%S %p'),
+                                })
 
-class Flight(FlightData):
-
-    def __init__(self):
-        super().__init__()
-        self.stop_overs = 0
-        self.via_city = ""
-        self.define_params()
-
-
-
-
-
+            via_city = self.search_response_list[-1]["via_city"]
+            alt_price = self.search_response_list[-1]["alt_price"]
+        except KeyError:
+            print(f"Thers's no flight for {code} even with 1 stopover")
 
